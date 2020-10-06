@@ -34,14 +34,6 @@ class kitti_object(object):
         print(root_dir, split)
         self.split_dir = os.path.join(root_dir, split)
 
-        if split == "training":
-            self.num_samples = 7481
-        elif split == "testing":
-            self.num_samples = 7518
-        else:
-            print("Unknown split: %s" % (split))
-            exit(-1)
-
         lidar_dir = "velodyne"
         depth_dir = "depth"
         pred_dir = "pred"
@@ -59,6 +51,11 @@ class kitti_object(object):
         self.depth_dir = os.path.join(self.split_dir, depth_dir)
         self.pred_dir = os.path.join(self.split_dir, pred_dir)
 
+        print("num of {} samples: {}".format(self.split, len(os.listdir(self.image_dir))))
+
+        if split == "training" or "testing":
+            self.num_samples = len(os.listdir(self.image_dir))
+
     def __len__(self):
         return self.num_samples
 
@@ -70,7 +67,6 @@ class kitti_object(object):
     def get_lidar(self, idx, dtype=np.float32, n_vec=4):
         assert idx < self.num_samples
         lidar_filename = os.path.join(self.lidar_dir, "%06d.bin" % (idx))
-        print(lidar_filename)
         return utils.load_velo_scan(lidar_filename, dtype, n_vec)
 
     def get_calibration(self, idx):
@@ -394,28 +390,28 @@ def show_lidar_with_depth(
             depth_pc_velo.tofile(save_filename)
 
     color = (0, 1, 0)
-    for obj in objects:
+    for i, obj in enumerate(objects):
         if obj.type == "DontCare":
             continue
         # Draw 3d bounding box
         _, box3d_pts_3d = utils.compute_box_3d(obj, calib.P)
         box3d_pts_3d_velo = calib.project_rect_to_velo(box3d_pts_3d)
-        print("box3d_pts_3d_velo:")
+        print("box3d_pts_3d_velo - Obj. {}".format(i + 1))
         print(box3d_pts_3d_velo)
 
-        draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, label=obj.type)
+        draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, label=str(obj.type) + '- Obj. ' + str(i + 1))
 
     if objects_pred is not None:
         color = (1, 0, 0)
-        for obj in objects_pred:
+        for i, obj in enumerate(objects_pred):
             if obj.type == "DontCare":
                 continue
             # Draw 3d bounding box
             _, box3d_pts_3d = utils.compute_box_3d(obj, calib.P)
             box3d_pts_3d_velo = calib.project_rect_to_velo(box3d_pts_3d)
-            print("box3d_pts_3d_velo:")
+            print("box3d_pts_3d_velo (Pred {}):".format(str(i + 1)))
             print(box3d_pts_3d_velo)
-            draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color)
+            draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, label=str(obj.type) + '- Pred. ' + str(i + 1))
             # Draw heading arrow
             _, ori3d_pts_3d = utils.compute_orientation_3d(obj, calib.P)
             ori3d_pts_3d_velo = calib.project_rect_to_velo(ori3d_pts_3d)
@@ -765,6 +761,14 @@ def dataset_viz(root_dir, args):
                 print("=== {} object ===".format(n_obj + 1))
                 obj.print_object()
                 n_obj += 1
+        if objects_pred is not None and len(objects_pred) > 0:
+            print("======== Predicted Objects ========")
+            n_obj = 0
+            for obj in objects_pred:
+                if obj.type != "DontCare":
+                    print("=== {} predicted object ===".format(n_obj + 1))
+                    obj.print_object()
+                    n_obj += 1
 
         # Draw 3d box in LiDAR point cloud
         if args.show_lidar_topview_with_boxes:
@@ -798,8 +802,8 @@ def dataset_viz(root_dir, args):
             # Show LiDAR points on image.
             show_lidar_on_image(pc_velo[:, 0:3], img, calib, img_width, img_height)
         input_str = raw_input()
-
-        mlab.clf()
+        if args.show_lidar_with_depth:
+            mlab.clf()
         if input_str == "killall":
             break
 
