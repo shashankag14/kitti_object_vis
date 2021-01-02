@@ -15,14 +15,18 @@ ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, "mayavi"))
 import kitti_util as utils
 import argparse
-
-try:
-    raw_input  # Python 2
-except NameError:
-    raw_input = input  # Python 3
+import pandas as pd
+import tqdm
+from pathlib import Path
+from bounding_box import bounding_box as bb
+import logging
+import mayavi.mlab as mlab
+from viz_util import draw_lidar_simple, draw_lidar, draw_gt_boxes3d
 
 cbox = np.array([[0, 70.4], [-40, 40], [-3, 1]])
 
+max_color = 30
+colors = utils.random_colors(max_color)
 
 class kitti_object(object):
     """Load and parse object data into a usable format."""
@@ -36,7 +40,7 @@ class kitti_object(object):
 
         lidar_dir = "velodyne"
         depth_dir = "depth"
-        pred_dir = "pred"
+        pred_dir = args.preddir
         if args is not None:
             lidar_dir = args.lidar
             depth_dir = args.depthdir
@@ -51,13 +55,26 @@ class kitti_object(object):
         self.depth_dir = os.path.join(self.split_dir, depth_dir)
         self.pred_dir = os.path.join(self.split_dir, pred_dir)
 
+        self.src_tar_links_path = os.path.join(self.split_dir, 'src_tar_links.txt')
+        if os.path.exists(self.src_tar_links_path):
+            columns = {'det_ind': str, 'src_episode': str, 'src_ind': str}
+            links_df = pd.read_csv(self.src_tar_links_path, names=list(columns.keys()),
+                                   dtype=columns, index_col=False, header=None)
+            self.src_tar_map = dict()
+            for _, link in links_df.iterrows():
+                self.src_tar_map.update({link['det_ind']: (link['src_episode'], link['src_ind'])})
+
         print("num of {} samples: {}".format(self.split, len(os.listdir(self.image_dir))))
 
         if split == "training" or "testing":
-            self.num_samples = len(os.listdir(self.image_dir))
+            self.num_samples = len(os.listdir(self.label_dir))
 
     def __len__(self):
         return self.num_samples
+
+    def __iter__(self):
+        for sample in os.listdir(self.label_dir):
+            yield sample
 
     def get_image(self, idx):
         assert idx < self.num_samples
@@ -78,6 +95,21 @@ class kitti_object(object):
         assert idx < self.num_samples and self.split == "training"
         label_filename = os.path.join(self.label_dir, "%06d.txt" % (idx))
         return utils.read_label(label_filename)
+
+    def get_tracking_objects(self, idx):
+        """ read output results of AB3DMOT tracking for car and pedestrian categories"""
+
+        tar_idx = '{0:06}'.format(idx)
+        src_episode, src_idx = self.src_tar_map[tar_idx]
+
+        car_preds_filename = os.path.join(self.pred_dir, 'pointpillar_Car_val',
+                                      'trk_withid', src_episode, "{}.txt".format(src_idx))
+        ped_preds_filename = os.path.join(self.pred_dir, 'pointpillar_Pedestrian_val',
+                                          'trk_withid', src_episode, "{}.txt".format(src_idx))
+        cars = utils.read_label(car_preds_filename)
+        peds = utils.read_label(ped_preds_filename)
+
+        return cars + peds
 
     def get_pred_objects(self, idx):
         assert idx < self.num_samples
@@ -171,48 +203,43 @@ def viz_kitti_video():
         pc = dataset.get_lidar(0)
         cv2.imshow("video", img)
         draw_lidar(pc)
-        raw_input()
+        input()
         pc[:, 0:3] = dataset.get_calibration().project_velo_to_rect(pc[:, 0:3])
         draw_lidar(pc)
-        raw_input()
+        input()
     return
 
 
-def show_image_with_boxes(img, objects, calib, show3d=True, depth=None):
+def show_image_with_boxes(img, objects, calib, show3d=True, depth=None, score_threshold=0.65):
     """ Show image with 2D bounding boxes """
-    img1 = np.copy(img)  # for 2d bbox
-    img2 = np.copy(img)  # for 3d bbox
-    #img3 = np.copy(img)  # for 3d bbox
+    img = np.copy(img)
+
     for obj in objects:
         if obj.type == "DontCare":
             continue
-        cv2.rectangle(
-            img1,
-            (int(obj.xmin), int(obj.ymin)),
-            (int(obj.xmax), int(obj.ymax)),
-            (0, 255, 0),
-            2,
-        )
-        box3d_pts_2d, _ = utils.compute_box_3d(obj, calib.P)
-        img2 = utils.draw_projected_box3d(img2, box3d_pts_2d)
-
-        # project
-        # box3d_pts_3d_velo = calib.project_rect_to_velo(box3d_pts_3d)
-        # box3d_pts_32d = utils.box3d_to_rgb_box00(box3d_pts_3d_velo)
-        # box3d_pts_32d = calib.project_velo_to_image(box3d_pts_3d_velo)
-        # img3 = utils.draw_projected_box3d(img3, box3d_pts_32d)
-    # print("img1:", img1.shape)
-    cv2.imshow("2dbox", img1)
-    # print("img3:",img3.shape)
-    # Image.fromarray(img3).show()
-    show3d = True
-    if show3d:
-        # print("img2:",img2.shape)
-        cv2.imshow("3dbox", img2)
-    if depth is not None:
-        cv2.imshow("depth", depth)
-    
-    return img1, img2
+        if hasattr(obj, 'score') and obj.score < score_threshold:
+            continue
+        if show3d:
+            # for predictions
+            if hasattr(obj, 'id'):
+                color = tuple([int(c * 255) for c in colors[int(obj.id) % max_color]])
+            else:
+                color = (0, 255, 0)
+            box3d_pts_2d, _ = utils.compute_box_3d(obj, calib.P)
+            if box3d_pts_2d is None:
+                continue
+            img = utils.draw_projected_box3d(img, box3d_pts_2d, color=color)
+        else:
+            # for predictions
+            if hasattr(obj, 'id'):
+                color = None
+                label = str(obj.type)[:3] + ' %d' % obj.id
+            else:
+                color = 'green'
+                label = None
+            pos = int(obj.xmin), int(obj.ymin), int(obj.xmax), int(obj.ymax)
+            bb.add(img, *pos, color=color, label=label)
+    return img
 
 
 def show_image_with_boxes_3type(img, objects, calib, objects2d, name, objects_pred):
@@ -348,16 +375,15 @@ def show_lidar_with_depth(
     img_height=None,
     objects_pred=None,
     depth=None,
-    cam_img=None,
     constraint_box=False,
     pc_label=False,
     save=False,
+    score_threshold=0.65,
 ):
     """ Show all LiDAR points.
         Draw 3d box in LiDAR point cloud (in velo coord system) """
     if "mlab" not in sys.modules:
         import mayavi.mlab as mlab
-    from viz_util import draw_lidar_simple, draw_lidar, draw_gt_boxes3d
 
     print(("All point num: ", pc_velo.shape[0]))
     if img_fov:
@@ -396,22 +422,24 @@ def show_lidar_with_depth(
         # Draw 3d bounding box
         _, box3d_pts_3d = utils.compute_box_3d(obj, calib.P)
         box3d_pts_3d_velo = calib.project_rect_to_velo(box3d_pts_3d)
-        print("box3d_pts_3d_velo - Obj. {}".format(i + 1))
-        print(box3d_pts_3d_velo)
+        logging.debug("box3d_pts_3d_velo - Obj. {}".format(i + 1))
+        logging.debug(box3d_pts_3d_velo)
 
         draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, label=str(obj.type) + '- Obj. ' + str(i + 1))
 
     if objects_pred is not None:
-        color = (1, 0, 0)
         for i, obj in enumerate(objects_pred):
             if obj.type == "DontCare":
                 continue
+            if obj.score < score_threshold:
+                continue
             # Draw 3d bounding box
             _, box3d_pts_3d = utils.compute_box_3d(obj, calib.P)
+            color = tuple(colors[int(obj.id) % max_color])
             box3d_pts_3d_velo = calib.project_rect_to_velo(box3d_pts_3d)
-            print("box3d_pts_3d_velo (Pred {}):".format(str(i + 1)))
-            print(box3d_pts_3d_velo)
-            draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, label=str(obj.type) + '- Pred. ' + str(i + 1))
+            logging.debug("box3d_pts_3d_velo (Pred {}):".format(str(i + 1)))
+            label = str(obj.type)[:3] + ' %d' % obj.id + ': {:.1f}'.format(obj.score)
+            draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, label=label)
             # Draw heading arrow
             _, ori3d_pts_3d = utils.compute_orientation_3d(obj, calib.P)
             ori3d_pts_3d_velo = calib.project_rect_to_velo(ori3d_pts_3d)
@@ -426,7 +454,13 @@ def show_lidar_with_depth(
                 line_width=1,
                 figure=fig,
             )
-    mlab.show(1)
+    mlab.view(
+        azimuth=180,
+        elevation=60,
+        focalpoint=[18, 0, 0],
+        distance=50.0,
+        figure=fig,
+    )
 
 
 def save_depth0(
@@ -549,7 +583,7 @@ def show_lidar_with_boxes(
             dep_pc_velo = calib.project_image_to_velo(depth_UVDepth)
             print("dep_pc_velo:", dep_pc_velo)
 
-            draw_lidar(dep_pc_velo, fig=fig, pts_color=(1, 1, 1))
+            draw_lidar(dep_pc_velo, fig=fig)
 
         # Draw heading arrow
         _, ori3d_pts_3d = utils.compute_orientation_3d(obj, calib.P)
@@ -636,7 +670,7 @@ def stat_lidar_with_boxes(pc_velo, objects, calib):
 
 def show_lidar_on_image(pc_velo, img, calib, img_width, img_height):
     """ Project LiDAR points to image """
-    img =  np.copy(img)
+    img = np.copy(img)
     imgfov_pc_velo, pts_2d, fov_inds = get_lidar_in_image_fov(
         pc_velo, calib, 0, 0, img_width, img_height, True
     )
@@ -658,7 +692,6 @@ def show_lidar_on_image(pc_velo, img, calib, img_width, img_height):
             color=tuple(color),
             thickness=-1,
         )
-    cv2.imshow("projection", img)
     return img
 
 
@@ -697,35 +730,70 @@ def show_lidar_topview_with_boxes(pc_velo, objects, calib, objects_pred=None):
 
 def dataset_viz(root_dir, args):
     dataset = kitti_object(root_dir, split=args.split, args=args)
-    ## load 2d detection results
-    #objects2ds = read_det_file("box2d.list")
+
+    fig = None
+    video_writer = None
+    camera_output = None
+    lidar_output = None
+
+    if args.demo:
+        mlab.options.offscreen = True
+
+        if not os.path.exists("demo"):
+            os.mkdir('demo')
+        if 'lidar' in args.demo and 'camera' in args.demo:
+            assert 'lidar' in args.save and 'camera' in args.save
+            video_writer = cv2.VideoWriter('demo/lidar_camera.avi', cv2.VideoWriter_fourcc('M', 'J',  'P', 'G'),
+                                           20, (1248, 384 * 2))
+        elif 'lidar' in args.demo:
+            assert 'lidar' in args.save
+            video_writer = cv2.VideoWriter(f'demo/{args.demo[0]}.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'),
+                                           20, (1248, 384))
+        else:
+            video_writer = cv2.VideoWriter(f'demo/{args.demo[0]}.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'),
+                                           20, (1248, 384))
+
+    if args.save:
+        mlab.options.offscreen = True
+
+        output_path = Path('output')
+        output_path.mkdir(exist_ok=True)
+        if 'camera' in args.save:
+            camera_output = output_path / 'camera'
+            camera_output.mkdir(exist_ok=True)
+        if 'lidar' in args.save:
+            lidar_output = Path('output/lidar')
+            lidar_output.mkdir(exist_ok=True)
 
     if args.show_lidar_with_depth:
-        import mayavi.mlab as mlab
+        fig = mlab.figure(figure=None, bgcolor=(0, 0, 0), fgcolor=None, engine=None, size=(int(1248), int(384)))
 
-        fig = mlab.figure(
-            figure=None, bgcolor=(0, 0, 0), fgcolor=None, engine=None, size=(1000, 500)
-        )
-    for data_idx in range(len(dataset)):
-        if args.ind > 0:
-            data_idx = args.ind
+    if args.inds_file_path:
+        with open(args.inds_file_path, 'r') as inds_file:
+
+            data_inds = [int(line) for line in inds_file.readlines()]
+    elif args.ind > 0:
+        data_inds = [int(args.ind)]
+    else:
+        data_inds = [sample.split("/")[-1].split(".")[0] for sample in dataset]
+
+    for data_idx in tqdm.tqdm(data_inds):
         # Load data from dataset
         if args.split == "training":
             objects = dataset.get_label_objects(data_idx)
         else:
             objects = []
-        #objects2d = objects2ds[data_idx]
 
         objects_pred = None
         if args.pred:
-            # if not dataset.isexist_pred_objects(data_idx):
-            #    continue
-            objects_pred = dataset.get_pred_objects(data_idx)
-            if objects_pred == None:
+            if args.ab3dmot_preds:
+                objects_pred = dataset.get_tracking_objects(data_idx)
+            else:
+                objects_pred = dataset.get_pred_objects(data_idx)
+
+            if objects_pred is None:
+                logging.debug(f"No predictions for id {data_idx}!")
                 continue
-        if objects_pred == None:
-            print("no pred file")
-            # objects_pred[0].print_object()
 
         n_vec = 4
         if args.pc_label:
@@ -736,37 +804,38 @@ def dataset_viz(root_dir, args):
             dtype = np.float64
         pc_velo = dataset.get_lidar(data_idx, dtype, n_vec)[:, 0:n_vec]
         calib = dataset.get_calibration(data_idx)
-        img = dataset.get_image(data_idx)
-        img_height, img_width, _ = img.shape
-        print(data_idx, "image shape: ", img.shape)
-        print(data_idx, "velo  shape: ", pc_velo.shape)
+        try:
+            img = dataset.get_image(data_idx)
+            img_height, img_width, _ = img.shape
+        except:
+            logging.warning(f'Cannot load image with index {data_idx}')
+            continue
+
+        logging.debug(data_idx, "image shape: ", img.shape)
+        logging.debug(data_idx, "velo  shape: ", pc_velo.shape)
+
         if args.depth:
             depth, _ = dataset.get_depth(data_idx)
             print(data_idx, "depth shape: ", depth.shape)
         else:
             depth = None
 
-        # depth = cv2.cvtColor(depth, cv2.COLOR_BGR2RGB)
-        # depth_height, depth_width, depth_channel = img.shape
-
-        # print(('Image shape: ', img.shape))
-
         if args.stat:
             stat_lidar_with_boxes(pc_velo, objects, calib)
             continue
-        print("======== Objects in Ground Truth ========")
+        logging.debug("======== Objects in Ground Truth ========")
         n_obj = 0
         for obj in objects:
             if obj.type != "DontCare":
-                print("=== {} object ===".format(n_obj + 1))
+                logging.debug("=== {} object ===".format(n_obj + 1))
                 obj.print_object()
                 n_obj += 1
         if objects_pred is not None and len(objects_pred) > 0:
-            print("======== Predicted Objects ========")
+            logging.debug("======== Predicted Objects ========")
             n_obj = 0
             for obj in objects_pred:
                 if obj.type != "DontCare":
-                    print("=== {} predicted object ===".format(n_obj + 1))
+                    logging.debug("=== {} predicted object ===".format(n_obj + 1))
                     obj.print_object()
                     n_obj += 1
 
@@ -775,10 +844,14 @@ def dataset_viz(root_dir, args):
             # Draw lidar top view
             show_lidar_topview_with_boxes(pc_velo, objects, calib, objects_pred)
 
-        # show_image_with_boxes_3type(img, objects, calib, objects2d, data_idx, objects_pred)
         if args.show_image_with_boxes:
+
+            logging.debug(data_idx, "image shape: ", img.shape)
+            logging.debug(data_idx, "velo  shape: ", pc_velo.shape)
+
             # Draw 2d and 3d boxes on image
-            show_image_with_boxes(img, objects, calib, True, depth)
+            img = show_image_with_boxes(img, objects, calib, False, depth)
+
         if args.show_lidar_with_depth:
             # Draw 3d box in LiDAR point cloud
             show_lidar_with_depth(
@@ -791,21 +864,55 @@ def dataset_viz(root_dir, args):
                 img_height,
                 objects_pred,
                 depth,
-                img,
                 constraint_box=args.const_box,
                 save=args.save_depth,
                 pc_label=args.pc_label,
             )
-            # show_lidar_with_boxes(pc_velo, objects, calib, True, img_width, img_height, \
-            #    objects_pred, depth, img)
         if args.show_lidar_on_image:
             # Show LiDAR points on image.
-            show_lidar_on_image(pc_velo[:, 0:3], img, calib, img_width, img_height)
-        input_str = raw_input()
+            img = show_lidar_on_image(pc_velo[:, 0:3], img, calib, img_width, img_height)
+
+        if args.save:
+            if 'lidar' in args.save:
+                fname = str(lidar_output) + '/lidar_{0:06d}.png'.format(data_idx)
+                mlab.savefig(filename=fname, figure=fig)
+            if 'camera' in args.save:
+                fname = str(camera_output) + '/camera_{0:06d}.png'.format(data_idx)
+                cv2.imwrite(filename=fname, img=img)
+        if args.demo:
+            if 'camera' in args.demo and 'lidar' not in args.demo:
+                video_writer.write(img)
+
         if args.show_lidar_with_depth:
-            mlab.clf()
-        if input_str == "killall":
-            break
+            mlab.show()
+            mlab.clf(figure=fig)
+        elif args.show_image_with_boxes:
+            cv2.imshow('Camera image with bounding boxes', img)
+            cv2.waitKey()
+        elif args.show_lidar_on_image:
+            cv2.imshow("Lidar PCs on camera image", img)
+            cv2.waitKey()
+
+    if args.demo:
+        if 'lidar' in args.demo and 'camera' in args.demo:
+            lidar_img_paths = list(lidar_output.glob("lidar*"))
+            lidar_img_paths.sort(key=lambda path: int(str(path.stem).split("_")[-1]))
+            for lidar_img_path in tqdm.tqdm(lidar_img_paths):
+                id = str(lidar_img_path.stem).split("_")[-1]
+                camera_img_path = camera_output / f'camera_{id}.png'
+                lidar_img = cv2.imread(str(lidar_img_path.absolute()))
+                cam_img = cv2.imread(str(camera_img_path.absolute()))
+                img_concat = cv2.vconcat([cam_img, lidar_img])
+                video_writer.write(img_concat)
+
+        elif 'lidar' in args.demo:
+            lidar_img_paths = list(lidar_output.glob("lidar*"))
+            lidar_img_paths.sort(key=lambda path: int(str(path.stem).split("_")[-1]))
+            for lidar_img_path in tqdm.tqdm(lidar_img_paths):
+                lidar_img = cv2.imread(str(lidar_img_path.absolute()))
+                video_writer.write(lidar_img)
+
+        video_writer.release()
 
 
 def depth_to_lidar_format(root_dir, args):
@@ -854,8 +961,6 @@ def read_det_file(det_filename):
 
 
 if __name__ == "__main__":
-    import mayavi.mlab as mlab
-    from viz_util import draw_lidar_simple, draw_lidar, draw_gt_boxes3d
 
     parser = argparse.ArgumentParser(description="KIITI Object Visualization")
     parser.add_argument(
@@ -909,7 +1014,7 @@ if __name__ == "__main__":
         "-r",
         "--preddir",
         type=str,
-        default="pred",
+        default="tracking_results",
         metavar="N",
         help="predicted boxes  (default: pred)",
     )
@@ -944,9 +1049,34 @@ if __name__ == "__main__":
         action="store_true",
         help="show lidar topview",
     )
+    parser.add_argument(
+        "--inds_file_path",
+        type=str,
+        default=None,
+        help="only use sample indices stored in inds_file",
+    )
+    parser.add_argument(
+        "--save",
+        type=str,
+        default=None,
+        nargs='+',
+        help="Specify which sensor(s) to be saved",
+    )
+    parser.add_argument(
+        "--demo",
+        type=str,
+        default=None,
+        nargs='+',
+        help="Specify which sensor(s) to be demonstrated",
+    )
+
+    parser.add_argument(
+        "--ab3dmot_preds", action="store_true", help="If True load tracking predictions of AB3DMOT."
+    )
+
     args = parser.parse_args()
     if args.pred:
-        assert os.path.exists(args.dir + "/" + args.split + "/pred")
+        assert os.path.exists(args.dir + "/" + args.split + "/" + args.preddir)
 
     if args.vis:
         dataset_viz(args.dir, args)

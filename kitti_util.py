@@ -8,6 +8,7 @@ from __future__ import print_function
 import numpy as np
 import cv2
 import os, math
+import colorsys
 from scipy.optimize import leastsq
 from PIL import Image
 
@@ -24,6 +25,18 @@ TOP_Z_DIVISION = 0.3
 
 cbox = np.array([[0, 70.4], [-40, 40], [-3, 2]])
 
+
+def random_colors(N, bright=True):
+    """
+    Generate random colors.
+    To get visually distinct colors, generate them in HSV space then
+    convert to RGB.
+    """
+    brightness = 1.0 if bright else 0.7
+    hsv = [(i / float(N), 1, brightness) for i in range(N)]
+    colors = list(map(lambda c: colorsys.hsv_to_rgb(*c), hsv))
+    # random.shuffle(colors)
+    return colors
 
 class Object2d(object):
     """ 2d object label """
@@ -76,6 +89,12 @@ class Object3d(object):
         self.l = data[10]  # box length (in meters)
         self.t = (data[11], data[12], data[13])  # location (x,y,z) in camera coord.
         self.ry = data[14]  # yaw angle (around Y-axis in camera coordinates) [-pi..pi]
+
+        try:
+            self.score = data[15]
+            self.id = data[16]
+        except:
+            pass
 
     def estimate_diffculty(self):
         """ Function that estimate difficulty to detect the object as defined in kitti website"""
@@ -632,7 +651,6 @@ def compute_box_3d(obj, P):
 
     # project the 3d bounding box into the image plane
     corners_2d = project_to_image(np.transpose(corners_3d), P)
-    # print 'corners_2d: ', corners_2d
     return corners_2d, np.transpose(corners_3d)
 
 

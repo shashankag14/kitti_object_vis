@@ -151,19 +151,23 @@ def draw_lidar_simple(pc, color=None):
     )
     return fig
 
+def draw_grid(x1, y1, x2, y2, fig, tube_radius=None, color=(0.5, 0.5, 0.5)):
+    mlab.plot3d([x1, x1], [y1, y2], [0, 0], color=color, tube_radius=tube_radius, line_width=1, figure=fig)
+    mlab.plot3d([x2, x2], [y1, y2], [0, 0], color=color, tube_radius=tube_radius, line_width=1, figure=fig)
+    mlab.plot3d([x1, x2], [y1, y1], [0, 0], color=color, tube_radius=tube_radius, line_width=1, figure=fig)
+    mlab.plot3d([x1, x2], [y2, y2], [0, 0], color=color, tube_radius=tube_radius, line_width=1, figure=fig)
+    return fig
 
-# pts_mode='sphere'
-def draw_lidar(
-    pc,
-    color=None,
-    fig=None,
-    bgcolor=(0, 0, 0),
-    pts_scale=0.3,
-    pts_mode="sphere",
-    pts_color=None,
-    color_by_intensity=False,
-    pc_label=False,
-):
+def draw_multi_grid_range(fig, grid_size=20, bv_range=(-60, -60, 60, 60)):
+    for x in range(bv_range[0], bv_range[2], grid_size):
+        for y in range(bv_range[1], bv_range[3], grid_size):
+            fig = draw_grid(x, y, x + grid_size, y + grid_size, fig)
+
+    return fig
+
+
+def draw_lidar(pc, color=None, fig=None, bgcolor=(0, 0, 0), fgcolor=(1.0, 1.0, 1.0), size=(300, 300), pts_scale=1,
+               pts_mode="point", show_intensity=True, pc_label=False):
     """ Draw lidar points
     Args:
         pc: numpy array (n,3) of XYZ
@@ -172,27 +176,20 @@ def draw_lidar(
     Returns:
         fig: created or used fig
     """
-    # ind = (pc[:,2]< -1.65)
-    # pc = pc[ind]
-    pts_mode = "point"
-    print("====================", pc.shape)
     if fig is None:
-        fig = mlab.figure(
-            figure=None, bgcolor=bgcolor, fgcolor=None, engine=None, size=(1600, 1000)
-        )
+        fig = mlab.figure(figure=None, bgcolor=bgcolor, fgcolor=fgcolor, engine=None, size=size)
     if color is None:
         color = pc[:, 2]
     if pc_label:
         color = pc[:, 4]
-    if color_by_intensity:
-        color = pc[:, 2]
+    if show_intensity:
+        color = pc[:, 3]
 
     mlab.points3d(
         pc[:, 0],
         pc[:, 1],
         pc[:, 2],
         color,
-        color=pts_color,
         mode=pts_mode,
         colormap="gnuplot",
         scale_factor=pts_scale,
@@ -200,119 +197,36 @@ def draw_lidar(
     )
 
     # draw origin
-    mlab.points3d(0, 0, 0, color=(1, 1, 1), mode="sphere", scale_factor=0.2)
-
-    # draw axis
-    axes = np.array(
-        [[2.0, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0], [0.0, 0.0, 2.0, 0.0]],
-        dtype=np.float64,
-    )
-    mlab.plot3d(
-        [0, axes[0, 0]],
-        [0, axes[0, 1]],
-        [0, axes[0, 2]],
-        color=(1, 0, 0),
-        tube_radius=None,
-        figure=fig,
-    )
-    mlab.plot3d(
-        [0, axes[1, 0]],
-        [0, axes[1, 1]],
-        [0, axes[1, 2]],
-        color=(0, 1, 0),
-        tube_radius=None,
-        figure=fig,
-    )
-    mlab.plot3d(
-        [0, axes[2, 0]],
-        [0, axes[2, 1]],
-        [0, axes[2, 2]],
-        color=(0, 0, 1),
-        tube_radius=None,
-        figure=fig,
-    )
+    mlab.points3d(0, 0, 0, color=(1, 1, 1), mode='cube', scale_factor=0.2)
+    mlab.plot3d([0, 3], [0, 0], [0, 0], color=(0, 0, 1), tube_radius=0.1)
+    mlab.plot3d([0, 0], [0, 3], [0, 0], color=(0, 1, 0), tube_radius=0.1)
+    mlab.plot3d([0, 0], [0, 0], [0, 3], color=(1, 0, 0), tube_radius=0.1)
 
     # draw fov (todo: update to real sensor spec.)
-    fov = np.array(
-        [[20.0, 20.0, 0.0, 0.0], [20.0, -20.0, 0.0, 0.0]], dtype=np.float64  # 45 degree
-    )
+    # fov = np.array(
+    #     [[20.0, 20.0, 0.0, 0.0], [20.0, -20.0, 0.0, 0.0]], dtype=np.float64  # 45 degree
+    # )
+    #
+    # mlab.plot3d(
+    #     [0, fov[0, 0]],
+    #     [0, fov[0, 1]],
+    #     [0, fov[0, 2]],
+    #     color=(1, 1, 1),
+    #     tube_radius=None,
+    #     line_width=1,
+    #     figure=fig,
+    # )
+    # mlab.plot3d(
+    #     [0, fov[1, 0]],
+    #     [0, fov[1, 1]],
+    #     [0, fov[1, 2]],
+    #     color=(1, 1, 1),
+    #     tube_radius=None,
+    #     line_width=1,
+    #     figure=fig,
+    # )
 
-    mlab.plot3d(
-        [0, fov[0, 0]],
-        [0, fov[0, 1]],
-        [0, fov[0, 2]],
-        color=(1, 1, 1),
-        tube_radius=None,
-        line_width=1,
-        figure=fig,
-    )
-    mlab.plot3d(
-        [0, fov[1, 0]],
-        [0, fov[1, 1]],
-        [0, fov[1, 2]],
-        color=(1, 1, 1),
-        tube_radius=None,
-        line_width=1,
-        figure=fig,
-    )
-
-    # draw square region
-    TOP_Y_MIN = -20
-    TOP_Y_MAX = 20
-    TOP_X_MIN = 0
-    TOP_X_MAX = 40
-    #TOP_Z_MIN = -2.0
-    #TOP_Z_MAX = 0.4
-
-    x1 = TOP_X_MIN
-    x2 = TOP_X_MAX
-    y1 = TOP_Y_MIN
-    y2 = TOP_Y_MAX
-    mlab.plot3d(
-        [x1, x1],
-        [y1, y2],
-        [0, 0],
-        color=(0.5, 0.5, 0.5),
-        tube_radius=0.1,
-        line_width=1,
-        figure=fig,
-    )
-    mlab.plot3d(
-        [x2, x2],
-        [y1, y2],
-        [0, 0],
-        color=(0.5, 0.5, 0.5),
-        tube_radius=0.1,
-        line_width=1,
-        figure=fig,
-    )
-    mlab.plot3d(
-        [x1, x2],
-        [y1, y1],
-        [0, 0],
-        color=(0.5, 0.5, 0.5),
-        tube_radius=0.1,
-        line_width=1,
-        figure=fig,
-    )
-    mlab.plot3d(
-        [x1, x2],
-        [y2, y2],
-        [0, 0],
-        color=(0.5, 0.5, 0.5),
-        tube_radius=0.1,
-        line_width=1,
-        figure=fig,
-    )
-
-    # mlab.orientation_axes()
-    mlab.view(
-        azimuth=180,
-        elevation=70,
-        focalpoint=[12.0909996, -1.04700089, -2.03249991],
-        distance=62.0,
-        figure=fig,
-    )
+    fig = draw_multi_grid_range(fig, bv_range=(0, -20, 60, 20))
     return fig
 
 
@@ -320,9 +234,9 @@ def draw_gt_boxes3d(
     gt_boxes3d,
     fig,
     color=(1, 1, 1),
-    line_width=1,
+    line_width=2,
     draw_text=True,
-    text_scale=(1, 1, 1),
+    text_scale=(.6, .6, .6),
     color_list=None,
     label=""
 ):
@@ -345,9 +259,9 @@ def draw_gt_boxes3d(
             color = color_list[n]
         if draw_text:
             mlab.text3d(
-                b[4, 0],
-                b[4, 1],
-                b[4, 2],
+                b[5, 0],
+                b[5, 1],
+                b[5, 2],
                 label,
                 scale=text_scale,
                 color=color,
@@ -387,8 +301,6 @@ def draw_gt_boxes3d(
                 line_width=line_width,
                 figure=fig,
             )
-    # mlab.show(1)
-    # mlab.view(azimuth=180, elevation=70, focalpoint=[ 12.0909996 , -1.04700089, -2.03249991], distance=62.0, figure=fig)
     return fig
 
 
