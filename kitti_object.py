@@ -9,6 +9,7 @@ import os
 import sys
 import numpy as np
 import cv2
+import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
@@ -77,24 +78,49 @@ class kitti_object(object):
             yield sample
 
     def get_image(self, idx):
-        assert idx < self.num_samples
-        img_filename = os.path.join(self.image_dir, "%06d.png" % (idx))
-        return utils.load_image(img_filename)
+        if isinstance(idx, int):
+            assert idx < self.num_samples
+            img_filename = os.path.join(self.image_dir, "%06d.png" % (idx))
+            return utils.load_image(img_filename)
+        elif isinstance(idx, str):
+            img_filename = os.path.join(self.image_dir, "{}.png".format(idx))
+            return utils.load_image(img_filename)
+        else:
+            ValueError("idx should be either int or str")
 
     def get_lidar(self, idx, dtype=np.float32, n_vec=4):
-        assert idx < self.num_samples
-        lidar_filename = os.path.join(self.lidar_dir, "%06d.bin" % (idx))
-        return utils.load_velo_scan(lidar_filename, dtype, n_vec)
+        if isinstance(idx, int):
+            assert idx < self.num_samples
+            lidar_filename = os.path.join(self.lidar_dir, "%06d.bin" % (idx))
+            return utils.load_velo_scan(lidar_filename, dtype, n_vec)
+        elif isinstance(idx, str):
+            lidar_filename = os.path.join(self.lidar_dir, "{}.bin".format(idx))
+            return utils.load_velo_scan(lidar_filename, dtype, n_vec)
+        else:
+            ValueError("idx should be either int or str")
+
 
     def get_calibration(self, idx):
-        assert idx < self.num_samples
-        calib_filename = os.path.join(self.calib_dir, "%06d.txt" % (idx))
-        return utils.Calibration(calib_filename)
+        if isinstance(idx, int):
+            assert idx < self.num_samples
+            calib_filename = os.path.join(self.calib_dir, "%06d.txt" % (idx))
+            return utils.Calibration(calib_filename)
+        elif isinstance(idx, str):
+            calib_filename = os.path.join(self.calib_dir, "{}.txt".format(idx))
+            return utils.Calibration(calib_filename)
+        else:
+            ValueError("idx should be either int or str")
 
     def get_label_objects(self, idx):
-        assert idx < self.num_samples and self.split == "training"
-        label_filename = os.path.join(self.label_dir, "%06d.txt" % (idx))
-        return utils.read_label(label_filename)
+        if isinstance(idx, int):
+            assert idx < self.num_samples and self.split == "training"
+            label_filename = os.path.join(self.label_dir, "%06d.txt" % (idx))
+            return utils.read_label(label_filename)
+        elif isinstance(idx, str):
+            label_filename = os.path.join(self.label_dir, "{}.txt".format(idx))
+            return utils.read_label(label_filename)
+        else:
+            ValueError("idx should be either int or str")
 
     def get_tracking_objects(self, idx):
         """ read output results of AB3DMOT tracking for car and pedestrian categories"""
@@ -112,13 +138,23 @@ class kitti_object(object):
         return cars + peds
 
     def get_pred_objects(self, idx):
-        assert idx < self.num_samples
-        pred_filename = os.path.join(self.pred_dir, "%06d.txt" % (idx))
-        is_exist = os.path.exists(pred_filename)
-        if is_exist:
-            return utils.read_label(pred_filename)
+        if isinstance(idx, int):
+            assert idx < self.num_samples
+            pred_filename = os.path.join(self.pred_dir, "%06d.txt" % (idx))
+            is_exist = os.path.exists(pred_filename)
+            if is_exist:
+                return utils.read_label(pred_filename)
+            else:
+                return None
+        elif isinstance(idx, str):
+            pred_filename = os.path.join(self.pred_dir, "{}.txt".format(idx))
+            is_exist = os.path.exists(pred_filename)
+            if is_exist:
+                return utils.read_label(pred_filename)
+            else:
+                return None
         else:
-            return None
+            ValueError("idx should be either int or str")
 
     def get_depth(self, idx):
         assert idx < self.num_samples
@@ -210,14 +246,12 @@ def viz_kitti_video():
     return
 
 
-def show_image_with_boxes(img, objects, calib, show3d=True, depth=None, score_threshold=0.65):
+def show_image_with_boxes(img, objects, calib, preds=None, show3d=True, depth=None, score_threshold=0.10):
     """ Show image with 2D bounding boxes """
     img = np.copy(img)
 
     for obj in objects:
         if obj.type == "DontCare":
-            continue
-        if hasattr(obj, 'score') and obj.score < score_threshold:
             continue
         if show3d:
             # for predictions
@@ -239,6 +273,32 @@ def show_image_with_boxes(img, objects, calib, show3d=True, depth=None, score_th
                 label = None
             pos = int(obj.xmin), int(obj.ymin), int(obj.xmax), int(obj.ymax)
             bb.add(img, *pos, color=color, label=label)
+    if preds is not None:
+        for pred in preds:
+            if pred.type == "DontCare":
+                continue
+            if hasattr(pred, 'score') and pred.score < score_threshold:
+                continue
+            if show3d:
+                # for predictions
+                if hasattr(pred, 'id'):
+                    color = tuple([int(c * 255) for c in colors[int(pred.id) % max_color]])
+                else:
+                    color = (0, 255, 0)
+                box3d_pts_2d, _ = utils.compute_box_3d(pred, calib.P)
+                if box3d_pts_2d is None:
+                    continue
+                img = utils.draw_projected_box3d(img, box3d_pts_2d, color=color)
+            else:
+                # for predictions
+                if hasattr(pred, 'id'):
+                    color = None
+                    label = str(pred.type)[:3] + ' %d' % pred.id
+                else:
+                    color = 'blue'
+                    label = None
+                pos = int(pred.xmin), int(pred.ymin), int(pred.xmax), int(pred.ymax)
+                bb.add(img, *pos, color=color, label=label)
     return img
 
 
@@ -378,7 +438,7 @@ def show_lidar_with_depth(
     constraint_box=False,
     pc_label=False,
     save=False,
-    score_threshold=0.65,
+    score_threshold=0.05,
 ):
     """ Show all LiDAR points.
         Draw 3d box in LiDAR point cloud (in velo coord system) """
@@ -435,11 +495,13 @@ def show_lidar_with_depth(
                 continue
             # Draw 3d bounding box
             _, box3d_pts_3d = utils.compute_box_3d(obj, calib.P)
-            color = tuple(colors[int(obj.id) % max_color])
+            # color = tuple(colors[int(obj.id) % max_color])
             box3d_pts_3d_velo = calib.project_rect_to_velo(box3d_pts_3d)
             logging.debug("box3d_pts_3d_velo (Pred {}):".format(str(i + 1)))
-            label = str(obj.type)[:3] + ' %d' % obj.id + ': {:.1f}'.format(obj.score)
-            draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, label=label)
+            # label = str(obj.type)[:3] + ' %d' % obj.id + ': {:.1f}'.format(obj.score)
+            label = str(obj.type)[:3] + ': {:.1f}'.format(obj.score)
+            # draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, label=label)
+            draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, label=label)
             # Draw heading arrow
             _, ori3d_pts_3d = utils.compute_orientation_3d(obj, calib.P)
             ori3d_pts_3d_velo = calib.project_rect_to_velo(ori3d_pts_3d)
@@ -449,7 +511,7 @@ def show_lidar_with_depth(
                 [x1, x2],
                 [y1, y2],
                 [z1, z2],
-                color=color,
+                #color=color,
                 tube_radius=None,
                 line_width=1,
                 figure=fig,
@@ -850,7 +912,7 @@ def dataset_viz(root_dir, args):
             logging.debug(data_idx, "velo  shape: ", pc_velo.shape)
 
             # Draw 2d and 3d boxes on image
-            img = show_image_with_boxes(img, objects, calib, False, depth)
+            img = show_image_with_boxes(img, objects, calib, preds=objects_pred, show3d=False, depth=depth)
 
         if args.show_lidar_with_depth:
             # Draw 3d box in LiDAR point cloud
@@ -884,7 +946,7 @@ def dataset_viz(root_dir, args):
                 video_writer.write(img)
 
         if args.show_lidar_with_depth:
-            mlab.show()
+            mlab.show(stop=True)
             mlab.clf(figure=fig)
         elif args.show_image_with_boxes:
             cv2.imshow('Camera image with bounding boxes', img)
