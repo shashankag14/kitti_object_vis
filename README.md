@@ -13,14 +13,26 @@ kitti
     object
         testing
             calib
+               000000.txt
             image_2
+               000000.png
             label_2
+               000000.txt
             velodyne
+               000000.bin
+            pred
+               000000.txt
         training
             calib
+               000000.txt
             image_2
+               000000.png
             label_2
+               000000.txt
             velodyne
+               000000.bin
+            pred
+               000000.txt
 ```
 
 ## Install locally on a Ubuntu 16.04 PC with GUI
@@ -114,10 +126,10 @@ $ python kitti_object.py --show_lidar_with_depth --img_fov --const_box --vis --s
 
 Show LiDAR and image with specific index
 ```
-$ python kitti_object.py --show_lidar_with_depth --img_fov --const_box --vis --show_image_with_boxes --ind 100 
+$ python kitti_object.py --show_lidar_with_depth --img_fov --const_box --vis --show_image_with_boxes --ind 1 
 ```
 
-Show LiDAR with label (5 vector)
+Show LiDAR with `modified LiDAR file` with an additional point cloud label/marker as the 5th dimention(5 vector: x, y, z, intensity, pc_label). (This option is for very specific case. If you don't have this type of data, don't use this option).
 ```
 $ python kitti_object.py --show_lidar_with_depth --img_fov --const_box --vis --pc_label
 ```
@@ -140,7 +152,7 @@ Firstly, map KITTI official formated results into data directory
 ```
 
 ```python
-python kitti_object.py -p
+python kitti_object.py -p --vis
 ```
 <img src="./imgs/pred.png" alt="Show Predicted Results" align="center" />
 
