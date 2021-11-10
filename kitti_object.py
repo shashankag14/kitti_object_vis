@@ -68,13 +68,13 @@ class kitti_object(object):
         print("num of {} samples: {}".format(self.split, len(os.listdir(self.image_dir))))
 
         if split == "training" or "testing":
-            self.num_samples = len(os.listdir(self.label_dir))
+            self.num_samples = len(os.listdir(self.image_dir))
 
     def __len__(self):
         return self.num_samples
 
     def __iter__(self):
-        for sample in os.listdir(self.label_dir):
+        for sample in os.listdir(self.image_dir):
             yield sample
 
     def get_image(self, idx):
@@ -246,7 +246,7 @@ def viz_kitti_video():
     return
 
 
-def show_image_with_boxes(img, objects, calib, preds=None, show3d=True, depth=None, score_threshold=0.10):
+def show_image_with_boxes(img, objects, calib, preds=None, show3d=True, depth=None, score_threshold=0.60):
     """ Show image with 2D bounding boxes """
     img = np.copy(img)
 
@@ -516,13 +516,27 @@ def show_lidar_with_depth(
                 line_width=1,
                 figure=fig,
             )
-    mlab.view(
-        azimuth=180,
-        elevation=60,
-        focalpoint=[18, 0, 0],
-        distance=50.0,
-        figure=fig,
-    )
+    # mlab.view(
+    #     azimuth=180,
+    #     elevation=60,
+    #     focalpoint=[18, 0, 0],
+    #     distance=50.0,
+    #     figure=fig,
+    # )
+    module_manager = fig.children[0].children[0]
+    module_manager.scalar_lut_manager.number_of_colors = 256
+    module_manager.scalar_lut_manager.lut_mode = 'jet'
+    module_manager.scalar_lut_manager.reverse_lut = True
+
+    glyph = fig.children[0].children[0].children[0]
+    glyph.actor.property.point_size = 3.0
+    scene = fig.scene
+    scene.camera.position = [-29.529421169679004, -0.029930304051940047, 15.629631264400999]
+    scene.camera.focal_point = [18.40446156066637, -0.9930973214186383, 1.4375491165923626]
+    scene.camera.view_angle = 30.0
+    scene.camera.view_up = [0.2838516930872115, -0.002267900426086406, 0.9588655134893428]
+    scene.camera.clipping_range = [0.47010602542195784, 470.10602542195784]
+
 
 
 def save_depth0(
@@ -828,7 +842,7 @@ def dataset_viz(root_dir, args):
             lidar_output.mkdir(exist_ok=True)
 
     if args.show_lidar_with_depth:
-        fig = mlab.figure(figure=None, bgcolor=(0, 0, 0), fgcolor=None, engine=None, size=(int(1248), int(384)))
+        fig = mlab.figure(figure=None, bgcolor=(0, 0, 0), fgcolor=None, engine=None, size=(int(2 * 634), int(2 * 477)))
 
     if args.inds_file_path:
         with open(args.inds_file_path, 'r') as inds_file:
@@ -837,7 +851,7 @@ def dataset_viz(root_dir, args):
     elif args.ind > 0:
         data_inds = [int(args.ind)]
     else:
-        data_inds = [sample.split("/")[-1].split(".")[0] for sample in dataset]
+        data_inds = sorted([int(sample.split("/")[-1].split(".")[0]) for sample in dataset])
 
     for data_idx in tqdm.tqdm(data_inds):
         # Load data from dataset
