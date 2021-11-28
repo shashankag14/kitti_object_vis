@@ -64,16 +64,17 @@ class Object2d(object):
 class Object3d(object):
     """ 3d object label """
 
-    def __init__(self, label_file_line):
-        data = label_file_line.split(" ")
+    def __init__(self, label_file_line=None, data=None):
+
+        if not data:
+            data = label_file_line.split(" ")
+
         data[1:] = [float(x) for x in data[1:]]
 
         # extract label, truncation, occlusion
         self.type = data[0]  # 'Car', 'Pedestrian', ...
         self.truncation = data[1]  # truncated pixel ratio [0..1]
-        self.occlusion = int(
-            data[2]
-        )  # 0=visible, 1=partly occluded, 2=fully occluded, 3=unknown
+        self.occlusion = int(data[2])  # 0=visible, 1=partly occluded, 2=fully occluded, 3=unknown
         self.alpha = data[3]  # object observation angle [-pi..pi]
 
         # extract 2d bounding box in 0-based coordinates
@@ -171,11 +172,17 @@ class Calibration(object):
         self.P = calibs["P2"]
         self.P = np.reshape(self.P, [3, 4])
         # Rigid transform from Velodyne coord to reference camera coord
-        self.V2C = calibs["Tr_velo_to_cam"]
+        try:
+            self.V2C = calibs["Tr_velo_to_cam"]
+        except:
+            self.V2C = calibs["Tr_velo_cam"]
         self.V2C = np.reshape(self.V2C, [3, 4])
         self.C2V = inverse_rigid_trans(self.V2C)
         # Rotation from reference camera coord to rect camera coord
-        self.R0 = calibs["R0_rect"]
+        try:
+            self.R0 = calibs["R0_rect"]
+        except:
+            self.R0 = calibs["R_rect"]
         self.R0 = np.reshape(self.R0, [3, 3])
 
         # Camera intrinsics and extrinsics
@@ -196,7 +203,11 @@ class Calibration(object):
                 line = line.rstrip()
                 if len(line) == 0:
                     continue
-                key, value = line.split(":", 1)
+                try:
+                    key, value = line.split(":", 1)
+                except:
+                    # tracking files do not have : for some of transforms
+                    key, value = line.split(" ", 1)
                 # The only non-float values in these files are dates, which
                 # we don't care about anyway
                 try:
@@ -344,6 +355,40 @@ class Calibration(object):
         return depth_pc_velo
 
 
+def box_min_max(box3d):
+    box_min = np.min(box3d, axis=0)
+    box_max = np.max(box3d, axis=0)
+    return box_min, box_max
+
+
+def depth_region_pt3d(depth, obj):
+    b = obj.box2d
+    # depth_region = depth[b[0]:b[2],b[2]:b[3],0]
+    pt3d = []
+    # import pdb; pdb.set_trace()
+    for i in range(int(b[0]), int(b[2])):
+        for j in range(int(b[1]), int(b[3])):
+            pt3d.append([j, i, depth[j, i]])
+    return np.array(pt3d)
+
+
+def get_velo_whl(box3d, pc):
+    bmin, bmax = box_min_max(box3d)
+    ind = np.where(
+        (pc[:, 0] >= bmin[0])
+        & (pc[:, 0] <= bmax[0])
+        & (pc[:, 1] >= bmin[1])
+        & (pc[:, 1] <= bmax[1])
+        & (pc[:, 2] >= bmin[2])
+        & (pc[:, 2] <= bmax[2])
+    )[0]
+    # print(pc[ind,:])
+    if len(ind) > 0:
+        vmin, vmax = box_min_max(pc[ind, :])
+        return vmax - vmin
+    else:
+        return 0, 0, 0, 0
+
 def get_depth_pt3d(depth):
     pt3d = []
     for i in range(depth.shape[0]):
@@ -351,6 +396,103 @@ def get_depth_pt3d(depth):
             pt3d.append([i, j, depth[i, j]])
     return np.array(pt3d)
 
+def get_lidar_in_image_fov(
+    pc_velo, calib, xmin, ymin, xmax, ymax, return_more=False, clip_distance=2.0
+):
+    """ Filter lidar points, keep those in image FOV """
+    pts_2d = calib.project_velo_to_image(pc_velo)
+    fov_inds = (
+        (pts_2d[:, 0] < xmax)
+        & (pts_2d[:, 0] >= xmin)
+        & (pts_2d[:, 1] < ymax)
+        & (pts_2d[:, 1] >= ymin)
+    )
+    fov_inds = fov_inds & (pc_velo[:, 0] > clip_distance)
+    imgfov_pc_velo = pc_velo[fov_inds, :]
+    if return_more:
+        return imgfov_pc_velo, pts_2d, fov_inds
+    else:
+        return imgfov_pc_velo
+
+
+def get_lidar_index_in_image_fov(
+    pc_velo, calib, xmin, ymin, xmax, ymax, return_more=False, clip_distance=2.0
+):
+    """ Filter lidar points, keep those in image FOV """
+    pts_2d = calib.project_velo_to_image(pc_velo)
+    fov_inds = (
+        (pts_2d[:, 0] < xmax)
+        & (pts_2d[:, 0] >= xmin)
+        & (pts_2d[:, 1] < ymax)
+        & (pts_2d[:, 1] >= ymin)
+    )
+    fov_inds = fov_inds & (pc_velo[:, 0] > clip_distance)
+    return fov_inds
+
+
+def save_depth(
+    data_idx,
+    pc_velo,
+    calib,
+    img_fov,
+    img_width,
+    img_height,
+    depth,
+    constraint_box=False,
+):
+
+    if depth is not None:
+        depth_pc_velo = calib.project_depth_to_velo(depth, constraint_box)
+
+        indensity = np.ones((depth_pc_velo.shape[0], 1)) * 0.5
+        depth_pc = np.hstack((depth_pc_velo, indensity))
+
+        print("depth_pc:", depth_pc.shape)
+
+    vely_dir = "data/object/training/depth_pc"
+    save_filename = os.path.join(vely_dir, "%06d.bin" % (data_idx))
+
+    depth_pc = depth_pc.astype(np.float32)
+    depth_pc.tofile(save_filename)
+
+def save_depth0(
+    data_idx,
+    pc_velo,
+    calib,
+    img_fov,
+    img_width,
+    img_height,
+    depth,
+    constraint_box=False,
+):
+
+    if img_fov:
+        pc_velo_index = get_lidar_index_in_image_fov(
+            pc_velo[:, :3], calib, 0, 0, img_width, img_height
+        )
+        pc_velo = pc_velo[pc_velo_index, :]
+        type = np.zeros((pc_velo.shape[0], 1))
+        pc_velo = np.hstack((pc_velo, type))
+        print(("FOV point num: ", pc_velo.shape))
+    # Draw depth
+    if depth is not None:
+        depth_pc_velo = calib.project_depth_to_velo(depth, constraint_box)
+
+        indensity = np.ones((depth_pc_velo.shape[0], 1)) * 0.5
+        depth_pc_velo = np.hstack((depth_pc_velo, indensity))
+
+        type = np.ones((depth_pc_velo.shape[0], 1))
+        depth_pc_velo = np.hstack((depth_pc_velo, type))
+        print("depth_pc_velo:", depth_pc_velo.shape)
+
+        depth_pc = np.concatenate((pc_velo, depth_pc_velo), axis=0)
+        print("depth_pc:", depth_pc.shape)
+
+    vely_dir = "data/object/training/depth_pc"
+    save_filename = os.path.join(vely_dir, "%06d.bin" % (data_idx))
+
+    depth_pc = depth_pc.astype(np.float32)
+    depth_pc.tofile(save_filename)
 
 def rotx(t):
     """ 3D Rotation about the x-axis. """
@@ -391,8 +533,8 @@ def inverse_rigid_trans(Tr):
 
 
 def read_label(label_filename):
-    lines = [line.rstrip() for line in open(label_filename)]
-    objects = [Object3d(line) for line in lines]
+    lines = [line.rstrip() for line in open(label_filename) if line.strip()]
+    objects = [Object3d(label_file_line=line) for line in lines]
     return objects
 
 
