@@ -52,10 +52,11 @@ class KITTIDataset(object):
         self.calib_dir = args.calib_dir if args.calib_dir else os.path.join(self.split_dir, calib_dir_name)
         self.depth_dir = args.depth_dir if args.depth_dir else os.path.join(self.split_dir, depth_dir_name)
         self.pred_dir = args.pred_dir if args.pred_dir else os.path.join(self.split_dir, pred_dir_name)
+        self.out_dir = args.out_dir
 
         if args.tracking:
             # load seq ids and count total num. of sample
-            self.seq_ids = args.seq_ids if args.seq_ids else os.listdir(self.image_dir)
+            self.seq_ids = args.seq_ids if args.seq_ids else os.listdir(self.pred_dir)
             self.seq_ids = sorted(["{:04d}".format(int(seq_id)) for seq_id in self.seq_ids], key=lambda x: int(x))
             print("Num. of {} sequences: {}".format(self.split, len(self.seq_ids)))
 
@@ -77,7 +78,7 @@ class KITTIDataset(object):
                         tokens[3:] = [float(x) for x in tokens[3:]]
                         frame_id = int(tokens[0])
                         track_id = tokens[1]
-                        data = tokens[3:] + ["-1"] + [track_id]  # -1 because labels do not have confidence
+                        data = tokens[2:] + ["-1"] + [track_id]  # -1 because labels do not have confidence
                         trk_label_all_frames[frame_id].append(Object3d(data=data))
                     self._trk_label_all_seqs[seq_id] = trk_label_all_frames
 
@@ -90,18 +91,51 @@ class KITTIDataset(object):
                         tokens[3:] = [float(x) for x in tokens[3:]]
                         frame_id = int(tokens[0])
                         track_id = tokens[1]
-                        data = tokens[2:] + [track_id]
+                        if len(tokens) == 21: # preds contain velocity
+                            data = tokens[2:-3] + [track_id] + tokens[-3:]
+                        else:
+                            data = tokens[2:] + [track_id]
                         trk_preds_all_frames[frame_id].append(Object3d(data=data))
                     self._trk_pred_all_seqs[seq_id] = trk_preds_all_frames
         else:
-            self.sample_ids = sorted([int(sample.split(".")[0]) for sample in os.listdir(self.image_dir)])
+            self.sample_ids = sorted([int(sample.split(".")[0]) for sample in os.listdir(self.pred_dir)])
             self.num_samples = len(self.sample_ids)
 
         if args.inds_file_path:
-            with open(args.inds_file_path, 'r') as inds_file:
-                self.sample_ids = [int(line) for line in inds_file.readlines()]
+            if args.tracking:
+                raise NotImplemented
+            else:
+                with open(args.inds_file_path, 'r') as inds_file:
+                    self.sample_ids = [int(line) for line in inds_file.readlines()]
+                self.num_samples = len(self.sample_ids)
+
         elif args.ind is not None:
-            self.sample_ids = [int(args.ind)]
+            if args.tracking:
+                # Expecting seq_id:sample_id_1,sample_id_2,sample_id_3,... input for --ind argument
+                assert len(args.ind.split(":")) == 2
+                seq_id, sample_ids = args.ind.split(":")
+                seq_id = "{:04d}".format(int(seq_id))
+                sample_ids = sorted([int(id) for id in sample_ids.split(",")])
+                self.sample_ids[seq_id] = sample_ids
+                self.num_samples[seq_id] = len(sample_ids)
+            else:
+                self.sample_ids = [int(id) for id in args.ind.split(",")]
+                self.num_samples = len(self.sample_ids)
+
+        elif args.start_idx is not None:
+            if args.tracking:
+                # Expecting seq_id:start_idx for --start_idx argument
+                assert len(args.start_idx.split(":")) == 2
+                seq_id, sample_idx = args.start_idx.split(":")
+                seq_id = "{:04d}".format(int(seq_id))
+                idx = self.sample_ids[seq_id].index(int(sample_idx))
+                self.sample_ids[seq_id] = self.sample_ids[seq_id][idx:]
+                self.num_samples[seq_id] = len(self.sample_ids[seq_id])
+            else:
+                self.sample_ids = sorted(self.sample_ids)
+                idx = self.sample_ids.index(int(args.start_idx))
+                self.sample_ids = self.sample_ids[idx:]
+                self.num_samples = len(self.sample_ids)
 
         print("Total num. of {} samples: {}".format(self.split, len(self)))
 
@@ -124,11 +158,11 @@ class KITTIDataset(object):
                 yield sample_id
 
     def check_idx(self, idx, seq_idx=None):
-        if isinstance(self.num_samples, dict) and seq_idx is not None:
-            num_samples = self.num_samples[seq_idx]
+        if isinstance(self.sample_ids, dict):
+            sample_ids = self.sample_ids[seq_idx]
         else:
-            num_samples = self.num_samples
-        assert idx < num_samples
+            sample_ids = self.sample_ids
+        assert idx in sample_ids
 
     def get_image(self, idx, seq_idx=None):
         self.check_idx(idx, seq_idx)
@@ -143,7 +177,7 @@ class KITTIDataset(object):
         if seq_idx:
             lidar_path = os.path.join(self.lidar_dir, "{:04d}".format(int(seq_idx)), "{:06d}.bin".format(int(idx)))
         else:
-            lidar_path = os.path.join(self.lidar_dir, "{:06d}.png".format(int(idx)))
+            lidar_path = os.path.join(self.lidar_dir, "{:06d}.bin".format(int(idx)))
         return utils.load_velo_scan(lidar_path, dtype, n_vec)
 
     def get_calibration(self, idx, seq_idx=None):
@@ -167,7 +201,7 @@ class KITTIDataset(object):
         if seq_idx:
             return self._trk_pred_all_seqs[seq_idx][idx]
         else:
-            label_path = os.path.join(self.label_dir, "{:06d}.txt".format(int(idx)))
+            label_path = os.path.join(self.pred_dir, "{:06d}.txt".format(int(idx)))
             return utils.read_label(label_path)
 
     def get_depth(self, idx):
@@ -209,18 +243,18 @@ class Visualizer(object):
         if args.save:
             mlab.options.offscreen = True
 
-            self.output_path = Path('output')
+            self.output_path = Path(args.out_dir)
             self.output_path.mkdir(exist_ok=True)
             if 'camera' in args.save:
                 self.camera_output = self.output_path / 'image_02'
-                self.camera_output.mkdir(exist_ok=True)
+                
             if 'lidar' in args.save:
                 self.lidar_output = self.output_path / 'velodyne'
                 self.lidar_output.mkdir(exist_ok=True)
 
         if args.show_lidar_with_depth:
             self.fig = mlab.figure(figure=None, bgcolor=(0, 0, 0), fgcolor=None,
-                                   engine=None, size=(int(2 * 634), int(2 * 477)))
+                                   engine=None, size=(960, 1080))
 
     def run(self):
         # TODO(farzad) multithreading has a problem with mayavi.
@@ -235,7 +269,7 @@ class Visualizer(object):
                 else:
                     self.run_pipeline(data_index)
 
-    def show_image_with_boxes(self, img, objects, calib, preds=None, show3d=True, score_threshold=0.60):
+    def show_image_with_boxes(self, img, objects, calib, preds=None, show3d=True, score_threshold=-2):
         """ Show image with 2D bounding boxes """
         img = np.copy(img)
 
@@ -286,8 +320,14 @@ class Visualizer(object):
                     else:
                         color = 'blue'
                         label = None
+                    print("truncation: " + str(pred.truncation))
+                    if pred.truncation == 0:
+                        color = 'blue'
+                    else:
+                        color = 'green'
                     pos = int(pred.xmin), int(pred.ymin), int(pred.xmax), int(pred.ymax)
-                    bb.add(img, *pos, color=color, label=label)
+                    # bb.add(img, *pos, color=color, label=label)
+                    bb.add(img, *pos, color=color)
         return img
 
     def show_image_with_boxes_3type(self, img, objects, objects2d, name, objects_pred):
@@ -361,19 +401,22 @@ class Visualizer(object):
 
     def show_lidar_with_depth(self, pc_velo, objects, calib, img_fov=False, img_width=None, img_height=None,
                               objects_pred=None, depth=None, constraint_box=False, pc_label=False, save=False,
-                              score_threshold=0.6):
+                              score_threshold=0.0, data_idx=None):
 
         """ Show all LiDAR points.
             Draw 3d box in LiDAR point cloud (in velo coord system) """
 
-        print(("All point num: ", pc_velo.shape[0]))
+        # print(("All point num: ", pc_velo.shape[0]))
         if img_fov:
             pc_velo_index = utils.get_lidar_index_in_image_fov(
                 pc_velo[:, :3], calib, 0, 0, img_width, img_height
             )
             pc_velo = pc_velo[pc_velo_index, :]
             print(("FOV point num: ", pc_velo.shape))
-        print("pc_velo", pc_velo.shape)
+        # print("pc_velo", pc_velo.shape)
+        # if data_idx is not None:
+        #     pts_world = calib.project_velo_to_world(pc_velo[:, :3], data_idx)
+        #     pc_velo[:, :3] = pts_world
         draw_lidar(pc_velo, fig=self.fig, pc_label=pc_label)
 
         # Draw depth
@@ -403,9 +446,6 @@ class Visualizer(object):
             # Draw 3d bounding box
             _, box3d_pts_3d = utils.compute_box_3d(obj, calib.P)
             box3d_pts_3d_velo = calib.project_rect_to_velo(box3d_pts_3d)
-            logging.debug("box3d_pts_3d_velo - Obj. {}".format(i + 1))
-            logging.debug(box3d_pts_3d_velo)
-
             draw_gt_boxes3d([box3d_pts_3d_velo], fig=self.fig, color=color,
                             label=str(obj.type) + '- Obj. ' + str(i + 1))
 
@@ -417,27 +457,69 @@ class Visualizer(object):
                     continue
                 # Draw 3d bounding box
                 _, box3d_pts_3d = utils.compute_box_3d(obj, calib.P)
-                # color = tuple(colors[int(obj.id) % max_color])
                 box3d_pts_3d_velo = calib.project_rect_to_velo(box3d_pts_3d)
-                logging.debug("box3d_pts_3d_velo (Pred {}):".format(str(i + 1)))
+                # color = tuple(colors[int(obj.id) % max_color])
+
+                # this works with unchanged MOT code
+                # box3d_pts_3d_velo = calib.project_rect_to_velo(box3d_pts_3d)
+                # box3d_pts_3d_world = calib.project_velo_to_world(box3d_pts_3d_velo, data_idx)
+
+                # this NOW DOES work with raw kf coordinates (i.e., w/o inverse trans in MOT)
+                # box3d_pts_3d_world = box3d_pts_3d
+
+                box3d_pts_3d_world = box3d_pts_3d_velo
+
+                print("box3d_pts_3d_velo (Pred {}):".format(str(i + 1)))
                 # label = str(obj.type)[:3] + ' %d' % obj.id + ': {:.1f}'.format(obj.score)
                 label = str(obj.type)[:3] + ': {:.1f}'.format(obj.score)
                 # draw_gt_boxes3d([box3d_pts_3d_velo], fig=self.fig, color=color, label=label)
-                draw_gt_boxes3d([box3d_pts_3d_velo], fig=self.fig, label=label)
+                # draw_gt_boxes3d([box3d_pts_3d_velo], fig=self.fig, label=label)
+                draw_gt_boxes3d([box3d_pts_3d_world], fig=self.fig, label=label)
                 # Draw heading arrow
-                _, ori3d_pts_3d = utils.compute_orientation_3d(obj, calib.P)
+                _, ori3d_pts_3d, vel_3d = utils.compute_orientation_3d(obj, calib.P)
                 ori3d_pts_3d_velo = calib.project_rect_to_velo(ori3d_pts_3d)
-                x1, y1, z1 = ori3d_pts_3d_velo[0, :]
-                x2, y2, z2 = ori3d_pts_3d_velo[1, :]
+
+                # this works with unchanged MOT code
+                # ori3d_pts_3d_velo = calib.project_rect_to_velo(ori3d_pts_3d)
+                # ori3d_pts_3d_world = calib.project_velo_to_world(ori3d_pts_3d_velo, data_idx)
+
+                # this NOW DOES work with raw kf coordinates (i.e., w/o inverse trans in MOT)
+                # ori3d_pts_3d_world = ori3d_pts_3d
+
+                ori3d_pts_3d_world = ori3d_pts_3d_velo
+
+                # x1, y1, z1 = ori3d_pts_3d_velo[0, :]
+                # x2, y2, z2 = ori3d_pts_3d_velo[1, :]
+                x1, y1, z1 = ori3d_pts_3d_world[0, :]
+                x2, y2, z2 = ori3d_pts_3d_world[1, :]
                 mlab.plot3d(
                     [x1, x2],
                     [y1, y2],
                     [z1, z2],
                     # color=color,
                     tube_radius=None,
-                    line_width=1,
-                    figure=self.fig,
-                )
+                    line_width=3,
+                    figure=self.fig)
+                if vel_3d is not None:
+                    # this works with unchanged MOT code
+                    vel_3d_velo = calib.project_rect_to_velo(vel_3d)
+                    # vel_3d_world = calib.project_velo_to_world(vel_3d_velo, data_idx)
+
+                    vel_3d_world = vel_3d_velo
+
+                    # vx1, vy1, vz1 = vel_3d_velo[0, :]
+                    # vx2, vy2, vz2 = vel_3d_velo[1, :]
+                    vx1, vy1, vz1 = vel_3d_world[0, :]
+                    vx2, vy2, vz2 = vel_3d_world[1, :]
+
+                    mlab.plot3d(
+                        [vx1, vx2],
+                        [vy1, vy2],
+                        [vz1, vz2],
+                        color=(0, 0, 1),
+                        tube_radius=None,
+                        line_width=5,
+                        figure=self.fig)
         # mlab.view(
         #     azimuth=180,
         #     elevation=60,
@@ -453,11 +535,17 @@ class Visualizer(object):
         glyph = self.fig.children[0].children[0].children[0]
         glyph.actor.property.point_size = 3.0
         scene = self.fig.scene
-        scene.camera.position = [-29.529421169679004, -0.029930304051940047, 15.629631264400999]
-        scene.camera.focal_point = [18.40446156066637, -0.9930973214186383, 1.4375491165923626]
-        scene.camera.view_angle = 30.0
-        scene.camera.view_up = [0.2838516930872115, -0.002267900426086406, 0.9588655134893428]
-        scene.camera.clipping_range = [0.47010602542195784, 470.10602542195784]
+        # scene.camera.position = [-5.0, -0.0, 70.0]
+        # scene.camera.focal_point = [15, 0, 2]
+        # scene.camera.view_angle = 35.0
+        # scene.camera.view_up = [0.2838516930872115, -0.002267900426086406, 0.9588655134893428]
+        # scene.camera.clipping_range = [0.47010602542195784, 470.10602542195784]
+        scene.camera.position = [-28.0, 0.0, 20]
+        scene.camera.focal_point = [16.0, 0.0, 5.0]
+        scene.camera.view_angle = 35.0
+        scene.camera.view_up = [0.2986504874130097, -3.982400525164888e-05, 0.954362554159592]
+        scene.camera.clipping_range = [0.4, 420.0]
+
 
     def show_lidar_with_boxes(self, pc_velo, objects, calib, img_fov=False, img_width=None, img_height=None,
                               objects_pred=None, depth=None):
@@ -501,7 +589,7 @@ class Visualizer(object):
                 draw_lidar(dep_pc_velo, fig=self.fig)
 
             # Draw heading arrow
-            _, ori3d_pts_3d = utils.compute_orientation_3d(obj, calib.P)
+            _, ori3d_pts_3d, _ = utils.compute_orientation_3d(obj, calib.P)
             ori3d_pts_3d_velo = calib.project_rect_to_velo(ori3d_pts_3d)
             x1, y1, z1 = ori3d_pts_3d_velo[0, :]
             x2, y2, z2 = ori3d_pts_3d_velo[1, :]
@@ -526,7 +614,7 @@ class Visualizer(object):
                 print(box3d_pts_3d_velo)
                 draw_gt_boxes3d([box3d_pts_3d_velo], fig=self.fig, color=color)
                 # Draw heading arrow
-                _, ori3d_pts_3d = utils.compute_orientation_3d(obj, calib.P)
+                _, ori3d_pts_3d, _ = utils.compute_orientation_3d(obj, calib.P)
                 ori3d_pts_3d_velo = calib.project_rect_to_velo(ori3d_pts_3d)
                 x1, y1, z1 = ori3d_pts_3d_velo[0, :]
                 x2, y2, z2 = ori3d_pts_3d_velo[1, :]
@@ -590,8 +678,6 @@ class Visualizer(object):
         top_image = utils.draw_top_image(top_view)
         print("top_image:", top_image.shape)
 
-        # gt
-
         def bbox3d(obj):
             _, box3d_pts_3d = utils.compute_box_3d(obj, calib.P)
             box3d_pts_3d_velo = calib.project_rect_to_velo(box3d_pts_3d)
@@ -619,27 +705,28 @@ class Visualizer(object):
     def run_pipeline(self, data_idx, seq_idx=None):
         # Load data from dataset
         objects_gt = []
-        if args.split == "training":
-            objects_gt = self.dataset.get_label_objects(data_idx, seq_idx)
-
-            logging.debug("======== Objects in Ground Truth ========")
-            n_obj = 0
-            for obj in objects_gt:
-                if obj.type != "DontCare":
-                    logging.debug("=== {} object ===".format(n_obj + 1))
-                    obj.print_object()
-                    n_obj += 1
+        # if args.split == "training":
+        #     objects_gt = self.dataset.get_label_objects(data_idx, seq_idx)
+        #
+        #     print(f"======================== GT Objects for Sample {data_idx} ========================")
+        #     n_obj = 0
+        #     for obj in objects_gt:
+        #         if obj.type != "Don   tCare":
+        #             print("=== {} object ===".format(n_obj + 1))
+        #             obj.print_object()
+        #             n_obj += 1
 
         objects_pred = None
         if args.show_preds:
             objects_pred = self.dataset.get_pred_objets(data_idx, seq_idx)
 
             if len(objects_pred) > 0:
-                logging.debug("======== Predicted Objects ========")
+                print()
+                print(f"======================== Predicted Objects for Sample {data_idx} ========================")
                 n_obj = 0
                 for obj in objects_pred:
                     if obj.type != "DontCare":
-                        logging.debug("=== {} predicted object ===".format(n_obj + 1))
+                        print("=== {} predicted object ===".format(n_obj + 1))
                         obj.print_object()
                         n_obj += 1
         n_vec = 4
@@ -655,11 +742,11 @@ class Visualizer(object):
             img = self.dataset.get_image(data_idx, seq_idx)
             img_height, img_width, _ = img.shape
         except:
-            logging.warning(f'Cannot load image with index {data_idx}')
+            print(f'Cannot load image with index {data_idx}')
             return
 
-        logging.debug(data_idx, "image shape: ", img.shape)
-        logging.debug(data_idx, "velo  shape: ", pc_velo.shape)
+        # print(data_idx, "image shape: ", img.shape)
+        # print(data_idx, "velo  shape: ", pc_velo.shape)
 
         if args.depth:
             depth, _ = self.dataset.get_depth(data_idx)
@@ -681,7 +768,7 @@ class Visualizer(object):
             logging.debug(data_idx, "velo  shape: ", pc_velo.shape)
 
             # Draw 2d and 3d boxes on image
-            img = self.show_image_with_boxes(img, objects_gt, calib, preds=objects_pred, show3d=False)
+            img = self.show_image_with_boxes(img, objects_gt, calib, preds=objects_pred, show3d=True)
 
         if args.show_lidar_with_depth:
             # Draw 3d box in LiDAR point cloud
@@ -697,6 +784,7 @@ class Visualizer(object):
                 constraint_box=args.const_box,
                 save=args.save_depth,
                 pc_label=args.pc_label,
+                data_idx=data_idx
             )
         if args.show_lidar_on_image:
             # Show LiDAR points on image.
@@ -706,15 +794,15 @@ class Visualizer(object):
             seq_id_str = "{:04d}".format(int(seq_idx)) if seq_idx is not None else ""
             file_name = "{:06d}.png".format(int(data_idx))
             if 'lidar' in args.save:
-                fig_path = os.path.join(str(self.lidar_output), seq_id_str, file_name)
+                fig_dir = os.path.join(str(self.lidar_output), seq_id_str)
+                if not os.path.exists(fig_dir): os.mkdir(fig_dir)
+                fig_path = fig_dir + "/" + file_name
                 mlab.savefig(filename=fig_path, figure=self.fig)
             if 'camera' in args.save:
-                fig_path = os.path.join(str(self.camera_output), seq_id_str, file_name)
+                fig_dir = os.path.join(str(self.camera_output), seq_id_str)
+                if not os.path.exists(fig_dir): os.mkdir(fig_dir)
+                fig_path = fig_dir + "/" + file_name
                 cv2.imwrite(filename=fig_path, img=img)
-
-        # TODO(farzad) do more cleanup here!
-        if hasattr(self, "fig"):
-            mlab.clf(self.fig)
 
         # TODO(farzad) Followings should be adapted for parallelism
         # Creating demo video. Currently no multithreading!
@@ -726,9 +814,9 @@ class Visualizer(object):
         if args.show_lidar_with_depth:
             mlab.show(stop=True)
             mlab.clf(figure=self.fig)
-        elif args.show_image_with_boxes:
-            cv2.imshow('Camera image with bounding boxes', img)
-            cv2.waitKey()
+        # elif args.show_image_with_boxes:
+        #     cv2.imshow('Camera image with bounding boxes', img)
+        #     cv2.waitKey()
         elif args.show_lidar_on_image:
             cv2.imshow("Lidar PCs on camera image", img)
             cv2.waitKey()
@@ -754,6 +842,9 @@ class Visualizer(object):
 
             self.video_writer.release()
 
+        # TODO(farzad) do more cleanup here!
+        if hasattr(self, "fig"):
+            mlab.clf(self.fig)
 
 def depth_to_lidar_format(root_dir, args):
     dataset = KITTIDataset(args)
@@ -796,16 +887,25 @@ if __name__ == "__main__":
     parser.add_argument(
         "-i",
         "--ind",
-        type=int,
+        type=str,
         default=None,
         metavar="N",
-        help="only use the sample index. (default: None (all))",
+        help="only use the sample index."
+             "For tracking use `seq_id:sample_id_1,sample_id_2,sample_id_3,...` format, "
+             "e.g., `0:1,2` for seq 0 and samples 1 and 2. (default: None (all))",
+    )
+    parser.add_argument(
+        "-s",
+        "--start_idx",
+        type=str,
+        default=None,
+        help="Start visualization from the given index",
     )
     parser.add_argument(
         "-p", "--show_preds", action="store_true", help="show predictions"
     )
     parser.add_argument(
-        "-s",
+        "-st",
         "--stat",
         action="store_true",
         help=" stat the w/h/l of point cloud in gt bbox",
@@ -859,6 +959,13 @@ if __name__ == "__main__":
         default=None,
         metavar="N",
         help="detection or tracking predictions dir (default: pred)",
+    )
+    parser.add_argument(
+        "--out_dir",
+        type=str,
+        default="output",
+        metavar="N",
+        help="output directory",
     )
     parser.add_argument("--gen_depth", action="store_true", help="generate depth")
     parser.add_argument("--vis", action="store_true", help="show images")
@@ -942,3 +1049,6 @@ if __name__ == "__main__":
 
     if args.gen_depth:
         depth_to_lidar_format(args.dir, args)
+
+    # dataset = KITTIDataset(args)
+    # dataset.to_lidar()

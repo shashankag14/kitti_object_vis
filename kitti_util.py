@@ -94,6 +94,9 @@ class Object3d(object):
         try:
             self.score = data[15]
             self.id = data[16]
+            self.vx = data[17]
+            self.vy = data[18]
+            self.vz = data[19]
         except:
             pass
 
@@ -128,6 +131,8 @@ class Object3d(object):
             % (self.t[0], self.t[1], self.t[2], self.ry)
         )
         print("Difficulty of estimation: {}".format(self.estimate_diffculty()))
+        if hasattr(self, 'vx'):
+            print("velocity (vx, vy, vz): ", self.vx, self.vy, self.vz)
 
 
 class Calibration(object):
@@ -168,10 +173,20 @@ class Calibration(object):
             calibs = self.read_calib_from_video(calib_filepath)
         else:
             calibs = self.read_calib_file(calib_filepath)
+
+        # calib_filepath = '/home/farzad/EagerMOT/output/Blickfeld/testing/ego_motion/0000.npy'
+        # self.ego_transformations = np.load(calib_filepath)
+
         # Projection matrix from rect camera coord to image2 coord
         self.P = calibs["P2"]
         self.P = np.reshape(self.P, [3, 4])
         # Rigid transform from Velodyne coord to reference camera coord
+        # try:
+        #     self.G2V = calibs['Tr_gps_to_velo']
+        #     self.G2V = np.reshape(self.G2V, [3, 4])
+        #     self.V2G = inverse_rigid_trans(self.G2V)
+        # except:
+        #     print("Warning: could not find GPS to Velodyne transform!")
         try:
             self.V2C = calibs["Tr_velo_to_cam"]
         except:
@@ -247,6 +262,20 @@ class Calibration(object):
     # ===========================
     # ------- 3d to 3d ----------
     # ===========================
+    def project_velo_to_world(self, pts_velo, ego2world_trans_index):
+        pts_velo = self.cart2hom(pts_velo) # nx4
+        ego2world = self.ego_transformations[ego2world_trans_index] # ego is defined based on the rect ref cam in kitti
+        pts_rect = np.dot(pts_velo, np.transpose(self.V2C))
+        pts_rect = self.cart2hom(pts_rect)
+        pts_world = np.dot(pts_rect, np.transpose(ego2world))
+        return pts_world[:, :3]
+
+    def rect_to_world(self, pts_rect, ego2world_trans_index):
+        pts_rect = self.cart2hom(pts_rect)  # nx4
+        ego2world = self.ego_transformations[ego2world_trans_index]
+        pts_world = np.dot(pts_rect, np.transpose(ego2world))
+        return pts_world[:, :3]
+
     def project_velo_to_ref(self, pts_3d_velo):
         pts_3d_velo = self.cart2hom(pts_3d_velo)  # nx4
         return np.dot(pts_3d_velo, np.transpose(self.V2C))
@@ -816,14 +845,24 @@ def compute_orientation_3d(obj, P):
     orientation_3d[1, :] = orientation_3d[1, :] + obj.t[1]
     orientation_3d[2, :] = orientation_3d[2, :] + obj.t[2]
 
+    vel_3d = None
+    if hasattr(obj, 'vx'):
+        # adding vel vector to visualization
+        vel_3d = np.array([[0, obj.vx], [0, obj.vy], [0, obj.vz]])
+        vel_3d = np.dot(R, vel_3d)
+        vel_3d[0, :] = vel_3d[0, :] + obj.t[0]
+        vel_3d[1, :] = vel_3d[1, :] + obj.t[1]
+        vel_3d[2, :] = vel_3d[2, :] + obj.t[2]
+        vel_3d = np.transpose(vel_3d)
+
     # vector behind image plane?
     if np.any(orientation_3d[2, :] < 0.1):
         orientation_2d = None
-        return orientation_2d, np.transpose(orientation_3d)
+        return orientation_2d, np.transpose(orientation_3d), vel_3d
 
     # project orientation into the image plane
     orientation_2d = project_to_image(np.transpose(orientation_3d), P)
-    return orientation_2d, np.transpose(orientation_3d)
+    return orientation_2d, np.transpose(orientation_3d), vel_3d
 
 
 def draw_projected_box3d(image, qs, color=(0, 255, 0), thickness=2):
