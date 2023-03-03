@@ -8,7 +8,7 @@ from __future__ import print_function
 import os
 import sys
 import numpy as np
-import cv2.cv2 as cv2
+import cv2
 import kitti_util as utils
 from kitti_util import Object3d
 import argparse
@@ -16,7 +16,25 @@ import tqdm
 from pathlib import Path
 from bounding_box import bounding_box as bb
 import logging
-import mayavi.mlab as mlab
+# imports mayavi only if the environment supports a display
+if os.name == 'posix' and "DISPLAY" not in os.environ:
+    headless_server = True
+    vis_dir = Path('/mnt/data/shag01/kitti_object_vis/vis_dir')
+    vis_dir.mkdir(parents=True, exist_ok=True)
+    """ Following will create a virtual display, Install pyvirtualdisplay using <pip install pyvirtualdisplay> """
+    from pyvirtualdisplay import Display
+
+    try:
+        display = Display(visible=0, size=(1920, 1080))
+        display.start()
+        import mayavi.mlab as mlab
+        mlab.options.offscreen = True
+    except: 
+        pass
+
+else:
+    import mayavi.mlab as mlab
+    headless_server = False
 from viz_util import draw_lidar, draw_gt_boxes3d
 from collections import defaultdict
 

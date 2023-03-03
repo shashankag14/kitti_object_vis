@@ -1,0 +1,8 @@
+opencv-python 
+pillow 
+scipy 
+matplotlib 
+tqdm 
+bounding-box 
+pyvirtualdisplay 
+opencv-python-headless
