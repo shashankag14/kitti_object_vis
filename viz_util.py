@@ -176,6 +176,9 @@ def draw_lidar(pc, color=None, fig=None, bgcolor=(1, 1, 1), fgcolor=(0, 0, 0), s
     Returns:
         fig: created or used fig
     """
+    # apply augmentation
+    # pc[:, 1] = -pc[:, 1]
+    # pc[:, :3] *= 1.05
     if fig is None:
         fig = mlab.figure(figure=None, bgcolor=bgcolor, fgcolor=fgcolor, engine=None, size=size)
     if color is None:
@@ -226,7 +229,8 @@ def draw_lidar(pc, color=None, fig=None, bgcolor=(1, 1, 1), fgcolor=(0, 0, 0), s
     #     figure=fig,
     # )
 
-    fig = draw_multi_grid_range(fig, bv_range=(0, -40, 80, 40))
+    # disabling grid lines for now
+    # fig = draw_multi_grid_range(fig, bv_range=(0, -40, 80, 40))
     return fig
 
 
@@ -234,7 +238,7 @@ def draw_gt_boxes3d(
     gt_boxes3d,
     fig,
     color=(1, 1, 1),
-    line_width=2,
+    line_width=5,
     draw_text=True,
     text_scale=(.6, .6, .6),
     color_list=None,

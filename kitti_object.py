@@ -493,7 +493,7 @@ def show_lidar_with_depth(
             depth_pc_velo = depth_pc_velo.astype(np.float32)
             depth_pc_velo.tofile(save_filename)
 
-    color = (0, 1, 0)
+    color = (1, 0, 0)
     for i, obj in enumerate(objects):
         if obj.type == "DontCare":
             continue
@@ -503,7 +503,7 @@ def show_lidar_with_depth(
         logging.debug("box3d_pts_3d_velo - Obj. {}".format(i + 1))
         logging.debug(box3d_pts_3d_velo)
 
-        draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, label=str(obj.type) + '- Obj. ' + str(i + 1))
+        draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, label="")
 
     if objects_pred is not None:
         for i, obj in enumerate(objects_pred):
