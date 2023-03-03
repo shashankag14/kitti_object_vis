@@ -21,7 +21,25 @@ import tqdm
 from pathlib import Path
 from bounding_box import bounding_box as bb
 import logging
-import mayavi.mlab as mlab
+# imports mayavi only if the environment supports a display
+if os.name == 'posix' and "DISPLAY" not in os.environ:
+    headless_server = True
+    vis_dir = Path('/mnt/data/shag01/kitti_object_vis/vis_dir')
+    vis_dir.mkdir(parents=True, exist_ok=True)
+    """ Following will create a virtual display, Install pyvirtualdisplay using <pip install pyvirtualdisplay> """
+    from pyvirtualdisplay import Display
+
+    try:
+        display = Display(visible=0, size=(1920, 1080))
+        display.start()
+        import mayavi.mlab as mlab
+        mlab.options.offscreen = True
+    except: 
+        pass
+
+else:
+    import mayavi.mlab as mlab
+    headless_server = False
 from viz_util import draw_lidar_simple, draw_lidar, draw_gt_boxes3d
 
 cbox = np.array([[0, 70.4], [-40, 40], [-3, 1]])
@@ -624,7 +642,7 @@ def show_lidar_with_boxes(
 
     print(("All point num: ", pc_velo.shape[0]))
     fig = mlab.figure(
-        figure=None, bgcolor=(0, 0, 0), fgcolor=None, engine=None, size=(1000, 500)
+        figure=None, bgcolor=(1, 1, 1), fgcolor=None, engine=None, size=(1000, 500)
     )
     if img_fov:
         pc_velo = get_lidar_in_image_fov(
@@ -842,7 +860,7 @@ def dataset_viz(root_dir, args):
             lidar_output.mkdir(exist_ok=True)
 
     if args.show_lidar_with_depth:
-        fig = mlab.figure(figure=None, bgcolor=(0, 0, 0), fgcolor=None, engine=None, size=(int(2 * 634), int(2 * 477)))
+        fig = mlab.figure(figure=None, bgcolor=(1, 1, 1), fgcolor=None, engine=None, size=(int(2 * 634), int(2 * 477)))
 
     if args.inds_file_path:
         with open(args.inds_file_path, 'r') as inds_file:

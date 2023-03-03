@@ -95,7 +95,7 @@ def rotz(t):
 def draw_lidar_simple(pc, color=None):
     """ Draw lidar points. simplest set up. """
     fig = mlab.figure(
-        figure=None, bgcolor=(0, 0, 0), fgcolor=None, engine=None, size=(1600, 1000)
+        figure=None, bgcolor=(1, 1, 1), fgcolor=None, engine=None, size=(1600, 1000)
     )
     if color is None:
         color = pc[:, 2]
@@ -166,7 +166,7 @@ def draw_multi_grid_range(fig, grid_size=20, bv_range=(-60, -60, 60, 60)):
     return fig
 
 
-def draw_lidar(pc, color=None, fig=None, bgcolor=(0, 0, 0), fgcolor=(1.0, 1.0, 1.0), size=(300, 300), pts_scale=1,
+def draw_lidar(pc, color=None, fig=None, bgcolor=(1, 1, 1), fgcolor=(0, 0, 0), size=(300, 300), pts_scale=1,
                pts_mode="point", show_intensity=True, pc_label=False):
     """ Draw lidar points
     Args:

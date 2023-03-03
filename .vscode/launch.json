@@ -1,0 +1,26 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args":[
+                "--dir", "/mnt/data/shag01/pcdet-st-reliable/OpenPCDet/data/kitti",
+                "--preddir", "/mnt/data/shag01/pcdet-st-reliable/OpenPCDet/output/cfgs/kitti_models/pv_rcnn_ssl_60/default/eval/epoch_60/val/default/final_result/data",
+                "--split", "testing",
+                "--vis",
+                "--show_lidar_with_depth",
+                // "--show_preds",
+                "--save", "lidar",
+                // "--pred_dir", "/mnt/data/shag01/pcdet-st-reliable/OpenPCDet/output/"
+                ]
+        }
+    ]
+}
