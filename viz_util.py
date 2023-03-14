@@ -226,7 +226,7 @@ def draw_lidar(pc, color=None, fig=None, bgcolor=(0, 0, 0), fgcolor=(1.0, 1.0, 1
     #     figure=fig,
     # )
 
-    fig = draw_multi_grid_range(fig, bv_range=(0, -40, 80, 40))
+    # fig = draw_multi_grid_range(fig, bv_range=(0, -40, 80, 40))
     return fig
 
 
