@@ -269,7 +269,7 @@ class Visualizer(object):
             if 'lidar' in args.save:
                 self.lidar_output = self.output_path / 'velodyne'
                 self.lidar_output.mkdir(exist_ok=True)
-
+        # change abckground here
         if args.show_lidar_with_depth:
             self.fig = mlab.figure(figure=None, bgcolor=(0, 0, 0), fgcolor=None,
                                    engine=None, size=(960, 1080))
@@ -459,13 +459,13 @@ class Visualizer(object):
 
         color = (0, 1, 0)
         for i, obj in enumerate(objects):
-            if obj.type == "DontCare":
+            if obj.type not in ['Car', 'Pedestrian', 'Cyclist']:
                 continue
             # Draw 3d bounding box
             _, box3d_pts_3d = utils.compute_box_3d(obj, calib.P)
             box3d_pts_3d_velo = calib.project_rect_to_velo(box3d_pts_3d)
-            draw_gt_boxes3d([box3d_pts_3d_velo], fig=self.fig, color=color,
-                            label=str(obj.type) + '- Obj. ' + str(i + 1))
+            draw_gt_boxes3d([box3d_pts_3d_velo], fig=self.fig, color=None,
+                            label=str(obj.type), draw_text=False)
 
         if objects_pred is not None:
             for i, obj in enumerate(objects_pred):
@@ -492,7 +492,7 @@ class Visualizer(object):
                 label = str(obj.type)[:3] + ': {:.1f}'.format(obj.score)
                 # draw_gt_boxes3d([box3d_pts_3d_velo], fig=self.fig, color=color, label=label)
                 # draw_gt_boxes3d([box3d_pts_3d_velo], fig=self.fig, label=label)
-                draw_gt_boxes3d([box3d_pts_3d_world], fig=self.fig, label=label)
+                draw_gt_boxes3d([box3d_pts_3d_world], fig=self.fig, label=label, color=(1,1,1))
                 # Draw heading arrow
                 _, ori3d_pts_3d, vel_3d = utils.compute_orientation_3d(obj, calib.P)
                 ori3d_pts_3d_velo = calib.project_rect_to_velo(ori3d_pts_3d)

@@ -166,8 +166,8 @@ def draw_multi_grid_range(fig, grid_size=20, bv_range=(-60, -60, 60, 60)):
     return fig
 
 
-def draw_lidar(pc, color=None, fig=None, bgcolor=(0, 0, 0), fgcolor=(1.0, 1.0, 1.0), size=(300, 300), pts_scale=1,
-               pts_mode="point", show_intensity=True, pc_label=False):
+def draw_lidar(pc, color=None, fig=None, bgcolor=(0, 0, 0), fgcolor=(1, 1, 1), size=(300, 300), pts_scale=1,
+               pts_mode="point", show_intensity=False, pc_label=False):
     """ Draw lidar points
     Args:
         pc: numpy array (n,3) of XYZ
@@ -179,7 +179,7 @@ def draw_lidar(pc, color=None, fig=None, bgcolor=(0, 0, 0), fgcolor=(1.0, 1.0, 1
     if fig is None:
         fig = mlab.figure(figure=None, bgcolor=bgcolor, fgcolor=fgcolor, engine=None, size=size)
     if color is None:
-        color = pc[:, 2]
+        color = np.full_like(pc[:,2], -10)
     if pc_label:
         color = pc[:, 4]
     if show_intensity:
@@ -191,7 +191,7 @@ def draw_lidar(pc, color=None, fig=None, bgcolor=(0, 0, 0), fgcolor=(1.0, 1.0, 1
         pc[:, 2],
         color,
         mode=pts_mode,
-        colormap="gnuplot",
+        colormap="inferno",
         scale_factor=pts_scale,
         figure=fig,
     )
@@ -236,7 +236,7 @@ def draw_gt_boxes3d(
     color=(1, 1, 1),
     line_width=2,
     draw_text=True,
-    text_scale=(.6, .6, .6),
+    text_scale=(.5, .5, .5),
     color_list=None,
     label=""
 ):
@@ -252,11 +252,14 @@ def draw_gt_boxes3d(
     Returns:
         fig: updated fig
     """
+    color_dict = {'Car': (1, 0, 1), 'Pedestrian': (0, 1, 0), 'Cyclist': (0, 1, 1)}
     num = len(gt_boxes3d)
     for n in range(num):
         b = gt_boxes3d[n]
         if color_list is not None:
             color = color_list[n]
+        if color is None:
+            color = color_dict[label]
         if draw_text:
             mlab.text3d(
                 b[5, 0],
