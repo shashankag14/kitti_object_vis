@@ -12,16 +12,14 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "args":[
-                "--dir", "/mnt/data/shag01/pcdet-st-reliable/OpenPCDet/data/kitti",
-                "--pred_dir", "/mnt/data/shag01/test/eval/epoch_60/val/default/final_result/data",
-                "--label_dir", "/mnt/data/shag01/pcdet-st-reliable/OpenPCDet/data/kitti/training/label_2",
-                "--split", "training",
+                "--dir", "/mnt/data/shag01/pcdet-st-reliable/OpenPCDet/data/kitti", //path to img dir
+                "--pred_dir", "/mnt/data/shag01/test/test_reliable_student/eval/epoch_60/val/default/final_result/data",    // path to pred dir
+                "--label_dir", "/mnt/data/shag01/pcdet-st-reliable/OpenPCDet/data/kitti/training/label_2",      // path to label dir
+                "--split", "testing",
                 "--vis",
                 "--show_lidar_with_depth",
-                // "--show_image_with_boxes"
-                "--show_preds",
                 "--save", "lidar",
-                "--out_dir", "output/"
+                "--out_dir", "output_rawpoint/",
                 ]
         }
     ]
