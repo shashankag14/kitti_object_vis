@@ -13,13 +13,14 @@
             "justMyCode": true,
             "args":[
                 "--dir", "/mnt/data/shag01/pcdet-st-reliable/OpenPCDet/data/kitti", //path to img dir
-                "--pred_dir", "/mnt/data/shag01/test/test_reliable_student/eval/epoch_60/val/default/final_result/data",    // path to pred dir
+                "--pred_dir", "/mnt/data/shag01/test/test_deka/final_result/data",    // path to pred dir after running test.py in OpenPCDet
                 "--label_dir", "/mnt/data/shag01/pcdet-st-reliable/OpenPCDet/data/kitti/training/label_2",      // path to label dir
-                "--split", "testing",
+                "--split", "training",
                 "--vis",
                 "--show_lidar_with_depth",
                 "--save", "lidar",
-                "--out_dir", "output_rawpoint/",
+                "--show_preds",
+                "--out_dir", "output_deka/",
                 ]
         }
     ]
